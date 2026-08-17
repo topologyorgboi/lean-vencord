@@ -1,0 +1,47 @@
+diff --git a/src/components/settings/tabs/plugins/PluginModal.tsx b/src/components/settings/tabs/plugins/PluginModal.tsx
+index 942c552..bb2a684 100644
+--- a/src/components/settings/tabs/plugins/PluginModal.tsx
++++ b/src/components/settings/tabs/plugins/PluginModal.tsx
+@@ -174,7 +174,7 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
+             title={
+                 <div className={cl("header")}>
+                     <BaseText tag="h1" weight="semibold" size="lg">{plugin.name}</BaseText>
+-                    {!pluginMeta.userPlugin && (
++                    {!pluginMeta.userPlugin ? (
+                         <div className="vc-settings-modal-links">
+                             <FavoriteButton
+                                 isFavorite={pluginSettings.isFavorite ?? false}
+@@ -189,6 +189,16 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
+                                 href={`https://github.com/${gitRemote}/tree/main/src/plugins/${pluginMeta.folderName}`}
+                             />
+                         </div>
++                    ) : plugin.sourceUrl && (
++                        // a userplugin is not in the Vencord repo, so the link can only come
++                        // from the plugin itself. favourite still applies, the info page does not
++                        <div className="vc-settings-modal-links">
++                            <FavoriteButton
++                                isFavorite={pluginSettings.isFavorite ?? false}
++                                onClick={() => pluginSettings.isFavorite = !pluginSettings.isFavorite}
++                            />
++                            <GithubButton text="View source code" href={plugin.sourceUrl} />
++                        </div>
+                     )}
+                 </div>
+             }
+diff --git a/src/utils/types.ts b/src/utils/types.ts
+index 5d25b17..66ca166 100644
+--- a/src/utils/types.ts
++++ b/src/utils/types.ts
+@@ -129,6 +129,12 @@ export interface PluginDef {
+     /** Additional search terms that will bring up your plugin */
+     searchTerms?: string[];
+     tags?: PluginTag[];
++    /**
++     * Where a userplugin's source lives. Bundled plugins get their github link built
++     * from the Vencord repo, which says nothing about a plugin installed by hand, so
++     * a userplugin can point at its own repo here to get the same link in its modal.
++     */
++    sourceUrl?: string;
+     authors: PluginAuthor[];
+     start?(): void;
+     stop?(): void;
