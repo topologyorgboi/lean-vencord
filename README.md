@@ -1,7 +1,7 @@
 # Lean
 
 Vencord userplugin. Strips the identifying headers Discord won't give you a setting for,
-and comes with a patch that makes Vencord boot about twice as fast.
+and comes with a patch that cuts Vencord's startup patching from 1.57s to 0.68s.
 
 ## Install
 
@@ -60,16 +60,28 @@ settings header from its own repo path, and skips it entirely for userplugins, s
 installed by hand has nowhere to point. The patch lets a userplugin supply its own
 `sourceUrl` and gets the same icon.
 
-`patchWebpack-prefilter.patch` touches Vencord's `src/webpack/patchWebpack.ts`. Vencord
-checks every module against every patch string one at a time. This puts a single combined
-regex in front, so the 98.5% of modules that match nothing skip the scan entirely.
+`patchWebpack-speed.patch` changes `src/webpack/patchWebpack.ts` and adds
+`src/webpack/diffErroredPatch.ts`. It removes two kinds of repeated work.
 
-On a live client, 14,436 modules against 221 patch strings:
+Searching. Vencord checks every module against every patch string one at a time. A single
+combined regex goes in front, so the 98% of modules that match nothing skip the per-patch
+scan.
 
-|                | before | after |
-| -------------- | ------ | ----- |
-| patcher CPU    | 1.55s  | 0.87s |
-| Vencord total  | 2.07s  | 1.32s |
+Compiling, which turned out to be the larger half. Vencord evaluated the module's whole
+source again after every single replacement and threw all but the last result away. One
+module here is patched 21 times, so it was compiled 21 times: 36 MB through the parser for
+a 24 MB bundle. It now compiles once, after every replacement has been applied. If that
+finished source doesn't parse, it recompiles one replacement at a time, which is what
+names the replacement at fault, so a broken patch still reports itself the way it used to.
+
+Time inside the patcher on a live client: 9,900 modules, 232 patches, 199 of them landing.
+Three cold boots per row, and every row patched the same 199 modules.
+
+|                    | patcher CPU |
+| ------------------ | ----------- |
+| stock Vencord      | 1.57s       |
+| + prefilter        | 1.21s       |
+| + compile once     | 0.68s       |
 
 ## Checks
 
@@ -79,7 +91,7 @@ powershell -File patcher-check.ps1   # cold boots the client, fails if a patch d
 ```
 
 Re-run `patcher-check.ps1` after you update Vencord. Updates overwrite `patchWebpack.ts`
-and take the prefilter with them.
+and take both patcher changes with them.
 
 ## License
 

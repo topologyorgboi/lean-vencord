@@ -2,9 +2,9 @@
 #
 # Correct : patchesRemaining 0, no warning beyond the known Vesktop
 #           enumerateDevices miss. Exits non-zero otherwise.
-# Fast    : topVencordFrames[0] is the patcher. ~1.55s before the prefilter, ~0.87s after.
+# Fast    : topVencordFrames[0] is the patcher. ~1.57s stock, ~0.68s with the patch.
 #
-# Run after any Vencord update, which overwrites patchWebpack.ts and drops the prefilter.
+# Run after any Vencord update, which overwrites patchWebpack.ts and drops both changes.
 #
 #   powershell -File patcher-check.ps1 -Label after-update
 param([string]$Label = "check", [int]$Port = 9223)
