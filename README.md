@@ -49,9 +49,30 @@ boot Discord can fire its first API call before a normal plugin is even running.
 
 ## Speed
 
-Animations, transitions and blur pause while the window isn't focused. Worth more on
-Vesktop than you'd expect, since it turns Chromium's own background throttling off.
-There's a separate toggle to kill every backdrop blur if you want the GPU back.
+Three toggles, each measured on a live client rather than assumed.
+
+**Freeze name effects** is the one that matters. Discord's looping username and avatar
+cosmetics never stop, and they are not cheap. One on screen measured 17.1-19.7% CPU against
+2.4-3.4% with it frozen, and about 1,620 style recalculations every twelve seconds against
+60. Two on screen measured 55% against 5%. Spinners, typing dots and skeletons are excluded
+by name, so a frozen one never reads as a hung client.
+
+CSS cannot do this. `animation-play-state: paused` computes to "paused" on both the element
+and its `::before`, and the animation keeps running anyway: 1,621 recalculations with the
+rule against 1,608 without it. Pausing the animation object itself does work, so that is
+what both toggles use.
+
+**Idle pause** freezes those same loops, plus transitions and blur, while the window is in
+the background. It is worth more on Vesktop than you'd expect, since Vesktop turns
+Chromium's own background throttling off.
+
+**Kill blur** removes every backdrop blur. There is usually nothing to remove until a popout
+or modal opens, which is where Discord's blur actually lives.
+
+Measured and dropped, so you know what isn't here: turning off spellcheck (7.9s against 7.6s
+to type 320 characters, inside the noise), `content-visibility` on message rows (Discord
+already virtualises the list, so barely anything offscreen is left to skip), and freezing
+animated images (0.05s per 8s).
 
 ## The patches
 

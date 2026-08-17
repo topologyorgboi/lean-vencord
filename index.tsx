@@ -102,11 +102,11 @@ function Section({ title, on, total, children }: React.PropsWithChildren<{
 function LeanPanel() {
     const s = settings.use([
         "spoofClient", "deviceProfile", "stripDebugHeaders",
-        "spoofTimezone", "idlePause", "killBlur"
+        "spoofTimezone", "idlePause", "freezeLoops", "killBlur"
     ]);
 
     const headersOn = [s.spoofClient, s.stripDebugHeaders, s.spoofTimezone].filter(Boolean).length;
-    const perfOn = [s.idlePause, s.killBlur].filter(Boolean).length;
+    const perfOn = [s.idlePause, s.freezeLoops, s.killBlur].filter(Boolean).length;
 
     return (
         <div className="vc-lean-panel">
@@ -146,11 +146,16 @@ function LeanPanel() {
                 <SweepButton />
             </Section>
 
-            <Section title="Performance" on={perfOn} total={2}>
+            <Section title="Performance" on={perfOn} total={3}>
                 <Row
                     name="Idle pause"
-                    note="Pause animations and blur while the window is unfocused. Nothing changes while you're looking at it."
+                    note="Freeze animations, transitions and blur while the window is in the background. Nothing changes while you're looking at it."
                     control={<Switch checked={s.idlePause} onChange={v => (s.idlePause = v)} />}
+                />
+                <Row
+                    name="Freeze name effects"
+                    note="Hold Discord's looping name and avatar cosmetics still. Measured 55% CPU against 5% on an idle window. Spinners keep moving."
+                    control={<Switch checked={s.freezeLoops} onChange={v => (s.freezeLoops = v)} />}
                 />
                 <Row
                     name="Kill blur"
@@ -207,8 +212,16 @@ const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         default: true,
         hidden: true,
-        description: "Pause animations and blur while the window is unfocused. Nothing changes while you're looking at it.",
-        onChange: applyCss
+        description: "Freeze animations, transitions and blur while the window is in the background. Nothing changes while you're looking at it.",
+        // this one drives both halves: the stylesheet for transitions and blur, the freeze for loops
+        onChange: () => { applyCss(); applyFreeze(); }
+    },
+    freezeLoops: {
+        type: OptionType.BOOLEAN,
+        default: false,
+        hidden: true,
+        description: "Freeze looping name and avatar cosmetics. The single biggest saving here, and the only visible cost is that those effects hold still. Spinners and typing dots keep moving.",
+        onChange: applyFreeze
     },
     killBlur: {
         type: OptionType.BOOLEAN,
@@ -318,6 +331,66 @@ function buildCss(): string {
     return css;
 }
 
+/*
+ * Discord's animated username and avatar cosmetics loop forever, and they are not cheap.
+ * Two of them on screen measured 54.8% CPU against 5.1% with animations paused, 1,598 style
+ * recalcs in twelve seconds against 64. Nothing else on an idle client came close.
+ *
+ * Loading spinners and typing dots loop too and have to keep moving, so they are excluded by
+ * class rather than frozen with the rest.
+ */
+// wanderingCubes, chasingDots, pulsingEllipsis and spinningCircle are Discord's own spinner
+// variants by name. A frozen spinner reads as a hung client, so they are named explicitly
+// rather than left to the generic words.
+const KEEP_MOVING = /spinner|spinning|wanderingCubes|chasingDots|pulsingEllipsis|loading|pulse|typing|ellipsis|progress|placeholder|skeleton/i;
+const frozen = new Set<Animation>();
+
+function isCosmeticLoop(a: Animation): boolean {
+    if (a.playState !== "running") return false;
+    if (a.effect?.getTiming().iterations !== Infinity) return false;
+    const { target } = a.effect as KeyframeEffect;
+    const cls = typeof target?.className === "string" ? target.className : "";
+    return !KEEP_MOVING.test(cls);
+}
+
+function freezeLoops() {
+    for (const a of document.getAnimations()) {
+        if (!isCosmeticLoop(a)) continue;
+        a.pause();
+        frozen.add(a);
+    }
+}
+
+function thawLoops() {
+    for (const a of frozen) {
+        // the element can be gone by now, which makes play() throw
+        try { a.play(); } catch { /* nothing to resume */ }
+    }
+    frozen.clear();
+}
+
+// frozen outright, or frozen for as long as the window is in the background
+const shouldFreeze = () =>
+    settings.store.freezeLoops || (settings.store.idlePause && !document.hasFocus());
+
+// animationstart bubbles, so one listener catches every cosmetic Discord adds later without
+// polling. a burst of them collapses into a single sweep per frame.
+let sweepQueued = false;
+const onAnimationStart = () => {
+    if (sweepQueued || !started || !shouldFreeze()) return;
+    sweepQueued = true;
+    requestAnimationFrame(() => {
+        sweepQueued = false;
+        if (started && shouldFreeze()) freezeLoops();
+    });
+};
+
+function applyFreeze() {
+    if (!started) return;
+    if (shouldFreeze()) freezeLoops();
+    else thawLoops();
+}
+
 function applyCss() {
     // onChange handlers stay registered for disabled plugins. without this guard a toggle
     // re-injects the stylesheet after stop() removed it
@@ -331,11 +404,27 @@ function applyCss() {
     el.textContent = buildCss();
 }
 
-// window blur also fires when focus moves into an embedded iframe, say a youtube or
-// spotify player in chat, where the user is still looking right at us
-// body can still be null when stop() runs, since start() is now Init-early
-const onBlur = () => { if (!document.hasFocus()) document.body?.classList.add("vc-lean-idle"); };
-const onFocus = () => document.body?.classList.remove("vc-lean-idle");
+/*
+ * window blur also fires when focus moves into an embedded iframe, say a youtube or
+ * spotify player in chat, where the user is still looking right at us.
+ * body can still be null when stop() runs, since start() is now Init-early.
+ *
+ * The stylesheet alone is not enough. Against a looping cosmetic, `animation-play-state:
+ * paused` computes to "paused" on both the element and its ::before, and the animation keeps
+ * running anyway: 1,621 style recalcs with the idle class against 1,608 without it. Calling
+ * pause() on the animation itself does stop it, so blur freezes loops the same way the
+ * Performance toggle does. The CSS stays for transitions and blur, which it does handle.
+ */
+const onBlur = () => {
+    if (document.hasFocus()) return;
+    document.body?.classList.add("vc-lean-idle");
+    if (settings.store.idlePause) freezeLoops();
+};
+const onFocus = () => {
+    document.body?.classList.remove("vc-lean-idle");
+    // leave them frozen if the user asked for that outright
+    if (!settings.store.freezeLoops) thawLoops();
+};
 
 // the header hook runs at StartAt.Init, which can be before document.head and
 // document.body exist, so everything touching the DOM waits for the document
@@ -345,6 +434,8 @@ function startDomWork() {
     onBlur();
     window.addEventListener("blur", onBlur);
     window.addEventListener("focus", onFocus);
+    document.addEventListener("animationstart", onAnimationStart, true);
+    applyFreeze();
 }
 
 export default definePlugin({
@@ -382,6 +473,8 @@ export default definePlugin({
         onFocus();
         window.removeEventListener("blur", onBlur);
         window.removeEventListener("focus", onFocus);
+        document.removeEventListener("animationstart", onAnimationStart, true);
+        thawLoops();
     }
 });
 
