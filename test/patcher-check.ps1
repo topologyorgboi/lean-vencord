@@ -6,7 +6,7 @@
 #
 # Run after any Vencord update, which overwrites patchWebpack.ts and drops both changes.
 #
-#   powershell -File patcher-check.ps1 -Label after-update
+#   powershell -File test/patcher-check.ps1 -Label after-update
 param([string]$Label = "check", [int]$Port = 9223)
 $ErrorActionPreference = "Stop"
 

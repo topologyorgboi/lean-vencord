@@ -1,8 +1,11 @@
 # Lean
 
-Vencord userplugin. Strips the identifying headers Discord won't give you a setting for,
-adds the mic gain stage the browser voice engine lacks, and ships a patch that cuts
-Vencord's startup patching from 1.57s to 0.68s.
+A Vencord plugin I made for myself. It strips a few identifying headers, adds a mic volume
+control that actually works on Vesktop, and makes Vencord boot a bit faster.
+
+Nothing here is clever. I got annoyed at some things and poked at them until they stopped
+annoying me. Numbers below are from my own machine, so take them as "roughly this" rather
+than anything scientific.
 
 ## Install
 
@@ -10,12 +13,12 @@ From your Vencord folder:
 
 ```
 git clone https://github.com/topologyorgboi/lean-vencord.git src/userplugins/lean
-git apply src/userplugins/lean/*.patch
+git apply src/userplugins/lean/patches/*.patch
 pnpm build
 ```
 
-Skip the `git apply` line if you just want the plugin. The patches only make Vencord boot
-faster and put a source link in the plugin's own settings header.
+Skip the `git apply` line if you only want the plugin. The patches just make Vencord boot
+faster and put a source link in the plugin's settings header.
 
 On Vesktop, `pnpm build` isn't enough. Vesktop keeps its own copy of Vencord and ignores
 `vencordDir`, so copy the build over yourself:
@@ -26,150 +29,152 @@ Copy-Item dist\vencordDesktop* "$env:APPDATA\vesktop\sessionData\vencordFiles" -
 
 Restart, then turn Lean on in Settings > Plugins.
 
-Turn **Vencord > Automatically update** off once you have. The updater replaces those same
-files with the official release build, which deletes your plugin, and then reports "Vencord
-has been updated!" with nothing in it. Vesktop itself leaves the files alone: its
-`ensureVencordFiles` only checks that they exist.
+Then go turn **Vencord > Automatically update** off, or the updater will quietly replace
+those files with the official build and your plugin is gone. It also pops up "Vencord has
+been updated!" with nothing in it, which is how I noticed. Vesktop itself doesn't touch the
+files, it only checks they exist.
 
-## What it does to your headers
+## Headers
 
-- `X-Super-Properties` is rewritten to claim some other Windows box. Build number and
-  release channel are left alone, since the server checks those.
-- The three launch IDs are overwritten, `launch_signature` included. That one is an actual
-  client-mod detector: libdiscore's WASM digs through `globalThis` for Vencord, Vesktop,
-  BetterDiscord and friends, then packs what it finds into the UUID it hands back. The names
-  are hex-encoded and XORed with `0x73`, which is why grepping the file turns up nothing.
-- `X-Debug-Options` and `X-Track` are dropped.
-- `X-Discord-Timezone` and `X-Discord-Locale` are pinned to the profile, so your city stops
-  riding along on every request.
-- `X-Fingerprint` stays. It ties register, login and captcha to one session, so killing it
-  breaks signup instead of hiding you.
+- `X-Super-Properties` gets rewritten so you look like some other Windows box. Build number
+  and release channel are left alone since the server checks those.
+- The three launch IDs get overwritten, including `launch_signature`. That one is an actual
+  client-mod detector: libdiscore's WASM goes through `globalThis` looking for Vencord,
+  Vesktop, BetterDiscord and friends, then packs what it finds into the UUID it hands back.
+  The names are hex-encoded and XORed with `0x73`, which is why grepping for them finds
+  nothing. Took me a while to work that one out.
+- `X-Debug-Options` and `X-Track` get dropped.
+- `X-Discord-Timezone` and `X-Discord-Locale` get pinned to the profile so your city isn't
+  attached to every request.
+- `X-Fingerprint` stays. It ties register, login and captcha together for a session, so
+  removing it breaks signup rather than hiding anything.
 
-Profiles are Windows-only. `Sec-CH-UA-Platform` is a forbidden header, nothing in the
-renderer can touch it, and it reports your real OS anyway. Claim macOS and you just end up
-looking stranger than everyone else.
+Profiles are Windows-only on purpose. `Sec-CH-UA-Platform` is a forbidden header, nothing in
+the renderer can touch it, and it reports your real OS anyway. Claim macOS and you just look
+weirder than everyone else.
 
-The plugin starts at `StartAt.Init`, earlier than plugins normally do, because on a warm boot
-Discord can fire its first API call before a normal plugin is running.
+The plugin starts at `StartAt.Init`, earlier than plugins usually do, because on a warm boot
+Discord can fire its first request before a normal plugin is even running.
 
 ## Speed
 
-Three toggles, each measured on a live client rather than assumed.
+Three toggles. I measured each one instead of guessing, but on one machine, so don't read too
+much into the exact figures.
 
-**Freeze gradient names** is the one that matters. Discord's looping username gradients never
-stop and are not cheap: one on screen measured 17.1-19.7% CPU against 2.4-3.4% frozen, and
-about 1,620 style recalculations per twelve seconds against 60. Two on screen measured 55%
-against 5%. Spinners, typing dots and skeletons are excluded by name, so a frozen one never
-reads as a hung client.
+**Freeze gradient names** is the one that actually matters. Those looping username gradients
+never stop and they're surprisingly expensive: one on screen was around 17-20% CPU, about 3%
+once frozen. Two on screen was roughly 55% against 5%. Spinners, typing dots and skeletons are
+skipped by name so nothing looks hung.
 
-It pauses Web Animations, so it cannot touch anything that was never one. Avatar decorations,
-nameplates and animated avatars are animated WebP decoded by the image pipeline, and
-`document.getAnimations()` never returns them. Discord's Reduced Motion setting stops those.
-Freezing animated images was measured anyway at 0.05s per 8s, so there was nothing to win.
+It works on Web Animations, so it can't touch anything that isn't one. Avatar decorations,
+nameplates and animated avatars are animated WebP handled by the image pipeline, and
+`document.getAnimations()` never returns them. Discord's own Reduced Motion setting covers
+those. I tried freezing animated images too and it saved basically nothing, so I dropped it.
 
-CSS cannot do this. `animation-play-state: paused` computes to "paused" on both the element
-and its `::before` while the animation keeps running: 1,621 recalculations with the rule
-against 1,608 without. Pausing the animation object does work, so that is what both toggles use.
+CSS can't do this, which surprised me. `animation-play-state: paused` computes as "paused" on
+the element and its `::before` and the animation just keeps going. Pausing the animation object
+does work, so that's what both toggles use.
 
-**Idle pause** freezes those same loops, plus transitions and blur, while the window is in the
-background. It is worth more on Vesktop than you'd expect, since Vesktop turns Chromium's own
-background throttling off.
+**Idle pause** freezes the same loops plus transitions and blur while the window is in the
+background. Worth more on Vesktop than you'd think, since Vesktop turns Chromium's background
+throttling off.
 
-**Kill blur** removes every backdrop blur. There is usually nothing to remove until a popout or
-modal opens, which is where Discord's blur lives.
+**Kill blur** removes backdrop blur. Usually there's nothing to remove until a popout or modal
+opens, which is where Discord's blur actually lives.
 
-Measured and dropped, so you know what isn't here: turning off spellcheck (7.9s against 7.6s to
-type 320 characters, inside the noise), `content-visibility` on message rows (Discord already
-virtualises the list), and freezing animated images (0.05s per 8s).
+Things I tried and threw away: turning off spellcheck (no real difference), `content-visibility`
+on message rows (Discord already virtualises the list), and freezing animated images.
 
 ## Voice
 
-Discord ships two voice engines in the same bundle and uses the native one only where a real
-`DiscordNative.nativeModules` can load `discord_voice`. Vesktop loads the web client, so it gets
-the browser engine, where `setInputVolume` is an empty function body:
+Discord ships two voice engines in the same bundle and only uses the native one where a real
+`DiscordNative.nativeModules` can load `discord_voice`. Vesktop runs the web client, so it gets
+the browser one, where `setInputVolume` is literally this:
 
 ```js
 setInputVolume(e){}
 ```
 
-Discord's **Input Volume slider does nothing there**, and there is nothing else to turn up:
-every gain node in the graph belongs to a remote user. `bypassSystemInputProcessing` is stored
-and applied by nothing for the same reason. The plugin reads the function body rather than
-asking the store, since every getter answers on both engines.
+So Discord's Input Volume slider does nothing on Vesktop. There's nothing else to turn up
+either, since every gain node in the graph belongs to someone else's voice. That's why your mic
+can be quiet with no setting anywhere that explains it. The plugin checks the function body
+rather than asking the store, because the getters answer the same on both engines.
 
-The client row reads the global the app injects rather than the user agent, since Vesktop
-reports itself as plain Chrome.
+The client row reads the global the app injects instead of the user agent, since Vesktop just
+says it's Chrome.
 
 ### Mic gain
 
-Chromium asks Windows for the *unprocessed* capture stream so its own echo canceller gets clean
-input, which also skips every system effect on that device. If your mic's level comes from a
-system effect chain, an Equalizer APO preamp or a vendor DSP, none of it arrives. Measured at
-**33.1 dB** below the same mic read through an ordinary capture over the same ten seconds, RMS
-and peak gaps agreeing to 0.1 dB: pure gain loss, not tone or dynamics.
+This is the part I actually built the plugin for. Chromium grabs the mic *before* Windows
+applies anything to it, so if your level comes from an Equalizer APO preamp or some vendor DSP,
+none of it shows up in Discord. On my setup that was about 33 dB of missing volume. The peaks
+and the average were both down by the same amount, so it's plain volume rather than EQ.
 
-No Discord or Windows setting recovers it. Toggling Chromium's own echo cancellation, noise
-suppression and gain control moved that gap by under 3 dB. It takes the raw stream either way.
+Nothing in Discord or Windows fixes it. I tried toggling Chromium's echo cancellation, noise
+suppression and gain control every way round and it barely moved.
 
-So the slider adds gain in the renderer, after `getUserMedia` and before Discord sees the track,
-with a limiter behind it so loud syllables clip instead of the gain being spent on headroom. At
-0 dB the stream passes through untouched and no audio graph is built. It does nothing on the
-desktop app, which routes only screen share and camera through `getUserMedia`.
+So the plugin adds the gain itself, wrapping `getUserMedia` before Discord ever sees the track,
+with a limiter after it so shouting doesn't clip. At 0 dB it does nothing at all and doesn't
+even build an audio graph. It also skips the desktop app entirely, where `getUserMedia` is only
+screen share and camera and boosting those would be silly.
 
-Since that gain node is the only thing on the input path, **Discord's own Input Volume slider is
-wired to it**, which is what makes that slider work on this engine at all. The dB setting is the
-ceiling and the slider trims down from it. The store value is clamped rather than trusted.
+Since that gain node is now the only thing on the mic path, **Discord's Input Volume slider is
+wired to it**, which finally makes that slider do something on Vesktop. The dB setting is your
+ceiling and the slider comes down from there.
 
-Verified by opening a wrapped and an unwrapped capture of the same mic at the same instant:
-asked 24 dB, measured 25.69 dB RMS and 25.71 dB peak. The extra 1.7 dB is
-`DynamicsCompressorNode`'s own gain, measured separately at +1.71 dB and constant at every input
-level. The same paired trick, with the unwrapped stream as a control the slider cannot reach,
-puts a half-volume move at -6.44 dB against -6.02 expected.
+I checked it by opening a boosted and an unboosted capture of the same mic at the same moment
+and comparing them, which was the only way to get a stable reading. Asking for 24 dB gave about
+25.7, the extra being the compressor's own gain, and halving the slider halved the volume like
+it should. Don't bother measuring this one arm at a time, a quiet room drifts more than the
+thing you're trying to measure and I got some very confident nonsense that way.
 
-Measure it that way or not at all. Every sequential attempt failed, two of them convincingly: a
-quiet room sits near -83 dBFS and drifts more between arms than the effect, which once produced
-a half-volume reading louder than full.
-
-Measured while working this out, so nobody repeats it: Krisp costs **0.38 dB** on speech, and
-voice CPU does not show up in renderer profiling at all, 6.5% of the renderer's main thread
-against 90-164% of a core across the whole process.
+Two things I found on the way, so nobody else wastes an evening: Krisp costs almost nothing on
+speech volume, and voice CPU doesn't show up in renderer profiling at all, so profiling the
+renderer tells you nothing about a call.
 
 ## The patches
 
 `plugin-modal-source-link.patch` is six lines. Vencord builds the github link in a plugin's
 settings header from its own repo path and skips it for userplugins, so a hand-installed plugin
-has nowhere to point. The patch lets a userplugin supply its own `sourceUrl`.
+has nowhere to point. This lets a userplugin supply its own `sourceUrl`.
 
-`patchWebpack-speed.patch` changes `src/webpack/patchWebpack.ts` and adds
-`src/webpack/diffErroredPatch.ts`. It removes two kinds of repeated work.
+`patchWebpack-speed.patch` touches `src/webpack/patchWebpack.ts` and adds
+`src/webpack/diffErroredPatch.ts`. Two bits of repeated work:
 
 Searching. Vencord checks every module against every patch string one at a time. A combined
-regex goes in front, so the 98% of modules matching nothing skip the per-patch scan.
+regex goes in front so the ~98% of modules that match nothing skip the per-patch scan.
 
-Compiling, the larger half. Vencord evaluated the module's whole source again after every
-replacement and threw all but the last away. One module here is patched 21 times, so it compiled
-21 times: 36 MB through the parser for a 24 MB bundle. It now compiles once, after every
-replacement is applied. If that source doesn't parse it recompiles one replacement at a time,
-which names the replacement at fault, so a broken patch still reports itself as before.
+Compiling, which was the bigger half. Vencord re-evaluated the module's whole source after
+every single replacement and threw away all but the last. One module here gets patched 21
+times, so it compiled 21 times. Now it compiles once, after all the replacements. If the result
+doesn't parse it falls back to one at a time, which is what names the broken replacement, so
+errors still look the same as before.
 
-Time inside the patcher on a live client: 9,900 modules, 232 patches, 199 landing. Three cold
-boots per row, every row patching the same 199 modules.
-
-|                    | patcher CPU |
-| ------------------ | ----------- |
-| stock Vencord      | 1.57s       |
-| + prefilter        | 1.21s       |
-| + compile once     | 0.68s       |
+On my client that took the patcher from about 1.6s to 0.7s, roughly half of it from each
+change. Same 199 patches applied either way.
 
 ## Checks
 
 ```
-node check.mjs                       # header, profile, voice and mic-gain logic
-powershell -File patcher-check.ps1   # cold boots the client, fails if a patch didn't apply
+node test/check.mjs                       # header, profile, voice and mic-gain logic
+powershell -File test/patcher-check.ps1   # cold boots the client, fails if a patch didn't apply
 ```
 
-Re-run `patcher-check.ps1` after updating Vencord. Updates overwrite `patchWebpack.ts` and take
-both patcher changes with them.
+The first one needs no client and no build: Node 23 and up strips the types itself, so it
+just imports `lib/` and runs. Re-run the second after updating Vencord, since updates
+overwrite `patchWebpack.ts` and take both patcher changes with them.
+
+## Layout
+
+```
+index.tsx      the plugin object, start and stop
+settings.ts    every setting and the one line of text on each
+hooks/         headers.ts, mic.ts, perf.ts: the three things it does
+lib/           the pure logic, no Discord imports, which is why test/ can run it
+ui/            the settings panel and its CSS
+patches/       the two optional Vencord patches
+test/          the checks above
+```
 
 ## License
 

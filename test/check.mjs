@@ -4,17 +4,17 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// Runnable check for the pure logic in spoof.ts.
-//   node check.mjs
-// Node 23 and above strips TS types natively, so no build step is needed.
+// Runs the pure logic in lib/ with no client and no build step.
+//   node test/check.mjs
+// Node 23 and above strips TS types natively, so the .ts imports run as-is.
 import assert from "node:assert/strict";
 
-import { dbToGain, effectiveGain, shouldBoost, wantsAudio } from "./micgain.ts";
-import { pickProfile, planTelemetrySweep, PROFILES, rewriteHeader, spoofSuperProps } from "./spoof.ts";
-import { detectClient, hasNativeAudioEngine, isRealImplementation } from "./voice.ts";
+import { dbToGain, effectiveGain, shouldBoost, wantsAudio } from "../lib/micgain.ts";
+import { pickProfile, PROFILES, rewriteHeader, spoofSuperProps } from "../lib/spoof.ts";
+import { detectClient, hasNativeAudioEngine, isRealImplementation } from "../lib/voice.ts";
 
 // windows-only profiles: Sec-CH-UA-Platform leaks the real OS anyway, so a
-// cross-OS profile just singles you out. why: spoof.ts
+// cross-OS profile just singles you out. why: lib/spoof.ts
 assert.ok(PROFILES.every(p => p.os === "Windows"), "a non-Windows profile contradicts the unspoofable Sec-CH-UA-Platform hint");
 
 const REAL = {
@@ -125,33 +125,6 @@ assert.equal(rewriteHeader("x-discord-locale", "en-GB", opts), target.system_loc
     for (const p of PROFILES)
         for (const k of ["id", "os", "os_version", "os_arch", "app_arch", "uaOs", "system_locale", "timezone"])
             assert.ok(p[k], `${p.id} missing ${k}`);
-}
-
-// 12. sweep touches only what is on, reports the rest as already off, and never
-//     claims to reach what it structurally cannot
-{
-    const allSafe = planTelemetrySweep({
-        noTrackDisableAnalytics: true,
-        spoofClient: true, stripDebugHeaders: true, spoofTimezone: true
-    });
-    assert.equal(allSafe.changed.length, 0, "nothing to change when everything is already safe");
-    assert.equal(allSafe.alreadyOff.length, 4);
-    assert.ok(allSafe.outOfReach.length > 0, "must always disclose what it cannot touch");
-
-    const allExposed = planTelemetrySweep({
-        noTrackDisableAnalytics: false,
-        spoofClient: false, stripDebugHeaders: false, spoofTimezone: false
-    });
-    assert.equal(allExposed.changed.length, 4);
-    assert.equal(allExposed.alreadyOff.length, 0);
-
-    // never silently kill another plugin's third-party calls: that is a
-    // functionality change, not a telemetry fix
-    assert.ok(allSafe.outOfReach.some(s => /Dearrow/.test(s)));
-
-    // cloud sync never gets swept: disclosed list, not changed
-    assert.ok(allSafe.outOfReach.some(s => /cloud settings sync/i.test(s)));
-    assert.ok(!allExposed.changed.some(s => /cloud/i.test(s)), "sweep must not disable cloud sync");
 }
 
 // voice engine detection

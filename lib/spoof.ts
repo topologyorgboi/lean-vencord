@@ -102,49 +102,6 @@ export function spoofSuperProps(b64: string, profile: Profile, uuid: string = SE
     }
 }
 
-/**
- * What "remove all telemetry" changes, kept out of the React button so it stays testable
- * without a DOM. Narrow by design: only what costs no Discord functionality. What NoTrack
- * already covers (analytics, METRICS_V2, Sentry, mod detection) is reported, not re-applied.
- */
-export interface TelemetrySweepResult {
-    changed: string[];
-    alreadyOff: string[];
-    outOfReach: string[];
-}
-
-export function planTelemetrySweep(current: {
-    noTrackDisableAnalytics: boolean;
-    spoofClient: boolean;
-    stripDebugHeaders: boolean;
-    spoofTimezone: boolean;
-}): TelemetrySweepResult {
-    const changed: string[] = [];
-    const alreadyOff: string[] = [];
-
-    if (!current.noTrackDisableAnalytics) changed.push("NoTrack analytics toggle (takes effect after restart)");
-    else alreadyOff.push("Discord analytics ('science')");
-
-    if (!current.spoofClient) changed.push("Lean client spoofing");
-    else alreadyOff.push("Lean client spoofing");
-    if (!current.stripDebugHeaders) changed.push("Lean debug-header stripping");
-    else alreadyOff.push("Lean debug-header stripping");
-    if (!current.spoofTimezone) changed.push("Lean timezone spoofing");
-    else alreadyOff.push("Lean timezone spoofing");
-
-    return {
-        changed,
-        alreadyOff,
-        outOfReach: [
-            "Vencord cloud settings sync: left on at your request. It uploads your plugin config to api.vencord.dev",
-            "METRICS_V2, Sentry crash reporting, and client-mod detection: already patched unconditionally by Vencord's required NoTrack plugin, so there is nothing to do here",
-            "Electron main-process telemetry (crash reporter) and the local RPC server: they run outside the renderer, where no plugin can reach them",
-            "Sec-CH-UA-Platform and the real Chromium User-Agent: forbidden request headers, unsettable from any renderer script",
-            "Third-party API calls made by other enabled feature plugins, such as Dearrow, ReverseImageSearch, and ClearURLs: those are features you switched on rather than telemetry, so this button leaves them alone"
-        ]
-    };
-}
-
 export interface RewriteOpts {
     /** null disables client spoofing. */
     profile: Profile | null;
