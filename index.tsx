@@ -168,8 +168,8 @@ function LeanPanel() {
                     control={<Switch checked={s.idlePause} onChange={v => (s.idlePause = v)} />}
                 />
                 <Row
-                    name="Freeze name effects"
-                    note="Hold Discord's looping name and avatar cosmetics still. Measured 55% CPU against 5% on an idle window. Spinners keep moving."
+                    name="Freeze gradient names"
+                    note="Hold looping CSS animations still. Measured 55% CPU against 5% on an idle window. Avatar decorations and nameplates are animated images, not animations, so they keep moving: Discord's Reduced Motion setting is what stops those."
                     control={<Switch checked={s.freezeLoops} onChange={v => (s.freezeLoops = v)} />}
                 />
                 <Row
@@ -258,7 +258,7 @@ const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         default: false,
         hidden: true,
-        description: "Freeze looping name and avatar cosmetics. The single biggest saving here, and the only visible cost is that those effects hold still. Spinners and typing dots keep moving.",
+        description: "Hold looping CSS animations still, gradient usernames above all. Cannot touch avatar decorations, nameplates or animated avatars: those are animated images, which Discord's own Reduced Motion setting covers. Spinners and typing dots keep moving.",
         onChange: applyFreeze
     },
     killBlur: {

@@ -51,11 +51,17 @@ boot Discord can fire its first API call before a normal plugin is even running.
 
 Three toggles, each measured on a live client rather than assumed.
 
-**Freeze name effects** is the one that matters. Discord's looping username and avatar
-cosmetics never stop, and they are not cheap. One on screen measured 17.1-19.7% CPU against
-2.4-3.4% with it frozen, and about 1,620 style recalculations every twelve seconds against
-60. Two on screen measured 55% against 5%. Spinners, typing dots and skeletons are excluded
-by name, so a frozen one never reads as a hung client.
+**Freeze gradient names** is the one that matters. Discord's looping username gradients never
+stop, and they are not cheap. One on screen measured 17.1-19.7% CPU against 2.4-3.4% with it
+frozen, and about 1,620 style recalculations every twelve seconds against 60. Two on screen
+measured 55% against 5%. Spinners, typing dots and skeletons are excluded by name, so a frozen
+one never reads as a hung client.
+
+It pauses Web Animations, so what it cannot touch is anything that was never one: avatar
+decorations, nameplates and animated avatars are animated WebP, decoded by the browser's image
+pipeline, and `document.getAnimations()` never returns them. Discord's own Reduced Motion
+setting stops those, which is why this doesn't try to. Freezing animated images was measured
+anyway and came to 0.05s per 8s, so there was nothing to win by duplicating that setting.
 
 CSS cannot do this. `animation-play-state: paused` computes to "paused" on both the element
 and its `::before`, and the animation keeps running anyway: 1,621 recalculations with the
