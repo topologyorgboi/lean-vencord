@@ -5,10 +5,7 @@
  */
 
 /*
- * Pure client-fingerprint logic for the Lean plugin.
- *
- * Nothing here imports Vencord, so check.mjs can run it under plain Node with no
- * build step.
+ * Pure client-fingerprint logic. Imports no Vencord, so check.mjs runs it under plain Node.
  */
 
 export interface Profile {
@@ -25,13 +22,12 @@ export interface Profile {
 }
 
 /*
- * Windows only. Sec-CH-UA-Platform is a forbidden header no renderer can touch, and
- * it says "Windows" whatever X-Super-Properties claims. A macOS blob next to a Windows
- * hint is a pairing no real client emits, so cross-OS profiles made this client easier
- * to pick out.
+ * Windows only. Sec-CH-UA-Platform is a forbidden header no renderer can touch and says
+ * "Windows" whatever X-Super-Properties claims, so a macOS blob beside a Windows hint is a
+ * pairing no real client emits.
  *
- * Add other platforms only once the rewrite moves to Vesktop's main process, where
- * onBeforeSendHeaders can set the hint too. See the ceiling note in index.tsx.
+ * Add platforms once the rewrite moves to Vesktop's main process, where onBeforeSendHeaders
+ * can set the hint too.
  */
 export const PROFILES: Profile[] = [
     { id: "win11-x64-us", os: "Windows", os_version: "10.0.22631", os_arch: "x64", app_arch: "x64", uaOs: "Windows NT 10.0; Win64; x64", system_locale: "en-US", timezone: "America/Chicago", os_sdk_version: "22631" },
@@ -43,14 +39,13 @@ export const PROFILES: Profile[] = [
 /**
  * Correlation IDs tying requests back to one launch.
  *
- * launch_signature is a working client-mod detector. A byte-level search of the live
- * libdiscore WASM (hex-decode, then XOR each byte with 0x73, which is why a plaintext
- * grep finds nothing) turns up a marker table naming Vencord, Vesktop, BetterDiscord,
- * Replugged, Moonlight, OpenAsar, Shelter and a dozen more. The WASM scans globalThis
- * for them at call time and bit-encodes the hits into the UUID it returns.
+ * launch_signature is a working client-mod detector. The libdiscore WASM hides a marker
+ * table (hex, then XOR 0x73, which is why a plaintext grep finds nothing) naming Vencord,
+ * Vesktop, BetterDiscord, Replugged, Moonlight, OpenAsar, Shelter and more. It scans
+ * globalThis for them at call time and bit-encodes the hits into the UUID it returns.
  *
- * NoTrack patches only the separate hasClientMods JS function, not this. Overwriting
- * the value still beats it: the real bits never reach the wire.
+ * NoTrack patches only the separate hasClientMods function. Overwriting the value still
+ * beats it: the real bits never reach the wire.
  */
 const LAUNCH_FIELDS = ["client_launch_id", "client_heartbeat_session_id", "launch_signature"];
 
@@ -64,8 +59,8 @@ const DROP_HEADERS = new Set(["x-debug-options", "x-track"]);
 export const SESSION_UUID = crypto.randomUUID();
 
 /**
- * Resolve a profile id. Unknown or empty picks at random. Callers must persist what
- * they got: a stable fake device is far less remarkable than a fresh one every launch.
+ * Resolve a profile id; unknown or empty picks at random. Callers must persist the result:
+ * a stable fake device is less remarkable than a fresh one every launch.
  */
 export function pickProfile(id: string | undefined, rand: () => number = Math.random): Profile {
     return PROFILES.find(p => p.id === id) ?? PROFILES[Math.floor(rand() * PROFILES.length)];
@@ -95,8 +90,8 @@ export function spoofSuperProps(b64: string, profile: Profile, uuid: string = SE
         if (typeof props.browser_user_agent === "string")
             props.browser_user_agent = props.browser_user_agent.replace(/\(([^)]*)\)/, `(${profile.uaOs})`);
 
-        // replaced, not deleted — every real client sends these, so a blob missing
-        // the keys has a shape nothing legitimate produces
+        // replaced, not deleted: every real client sends these, so a blob missing the
+        // keys has a shape nothing legitimate produces
         for (const f of LAUNCH_FIELDS) if (f in props) props[f] = uuid;
 
         return btoa(JSON.stringify(props));
@@ -108,13 +103,9 @@ export function spoofSuperProps(b64: string, profile: Profile, uuid: string = SE
 }
 
 /**
- * What "remove all telemetry" actually changes, kept out of the React button so it
- * stays testable without a DOM.
- *
- * The scope is narrow by design: only what is confirmed to cost no Discord
- * functionality. Whatever NoTrack already covers unconditionally (analytics,
- * METRICS_V2, Sentry, mod detection) is reported, not re-applied, since it is a
- * required plugin and always on.
+ * What "remove all telemetry" changes, kept out of the React button so it stays testable
+ * without a DOM. Narrow by design: only what costs no Discord functionality. What NoTrack
+ * already covers (analytics, METRICS_V2, Sentry, mod detection) is reported, not re-applied.
  */
 export interface TelemetrySweepResult {
     changed: string[];

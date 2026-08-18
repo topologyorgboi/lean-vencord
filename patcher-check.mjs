@@ -13,7 +13,7 @@ const t0 = Number(process.argv[3]);
 const LABEL = process.argv[4] || "run";
 
 // vesktop's own enumerateDevices patch misses on this build, predates the
-// prefilter, so it's the control — anything else is a regression
+// prefilter, so it's the control: anything else is a regression
 const KNOWN_WARNINGS = [/enumerateDevices/];
 
 async function tryJson(path) {
@@ -44,7 +44,7 @@ ws.addEventListener("message", e => {
     if (m.method !== "Runtime.consoleAPICalled") return;
 
     // vencord prefixes every log with a %c format string plus CSS args, so the
-    // message lands last — read the head and you only get CSS
+    // message lands last: read the head and you only get CSS
     const text = (m.params.args || []).map(a => a.value ?? a.description ?? "")
         .filter(s => !/^(background|color):/.test(s) && s !== "%c Vencord %c %c WebpackPatcher ")
         .join(" ");
@@ -127,7 +127,7 @@ console.log(JSON.stringify({
     noUrl: top(noUrl, 5)
 }, null, 2));
 
-// a patch still in the array never found its module — how a broken prefilter shows
+// a patch still in the array never found its module: how a broken prefilter shows
 // up. time to usable is reported but never failed on, too much of it is network
 const failures = [];
 if (typeof patchesRemaining !== "number") failures.push("could not read the patch list from the client");
