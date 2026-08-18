@@ -72,6 +72,18 @@
     padding: 0 16px 6px;
 }
 
+/* a read-only answer, sized to sit where a switch would */
+.vc-lean-verdict {
+    display: inline-block;
+    padding: 3px 10px;
+    border: 1px solid var(--border-subtle, rgb(255 255 255 / 8%));
+    border-radius: 999px;
+    background: var(--background-secondary, rgb(255 255 255 / 4%));
+    color: var(--text-default, #dbdee1);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
 .vc-lean-row {
     display: flex;
     align-items: center;

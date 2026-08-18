@@ -19,11 +19,25 @@ import { definePluginSettings, Settings } from "@api/Settings";
 import { Switch } from "@components/Switch";
 import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType, StartAt } from "@utils/types";
+import { findByPropsLazy } from "@webpack";
 import { Button, Forms, Select, showToast, Toasts } from "@webpack/common";
 
 import { pickProfile, planTelemetrySweep, PROFILES, rewriteHeader, type RewriteOpts } from "./spoof";
+import { detectClient, hasNativeAudioEngine } from "./voice";
 
 const logger = new Logger("Lean");
+
+const MediaEngineStore = findByPropsLazy("getNoiseSuppression", "getEchoCancellation");
+
+// the store is a lazy proxy and the engine is built on demand, so both can throw before a
+// voice channel has ever been opened. an unreadable engine is "unknown", never "browser".
+function readAudioEngine(): boolean | null {
+    try {
+        return hasNativeAudioEngine(MediaEngineStore?.getMediaEngine?.());
+    } catch {
+        return null;
+    }
+}
 
 // last row of the security section: it is an action over those same toggles, not a
 // separate feature, so it belongs with them rather than above the whole panel
@@ -86,13 +100,13 @@ function Row({ name, note, control, stacked }: {
 // open by default: a collapsed panel hides whether anything is on, and the count in the
 // summary is only useful once you have closed it yourself
 function Section({ title, on, total, children }: React.PropsWithChildren<{
-    title: string; on: number; total: number;
+    title: string; on?: number; total?: number;
 }>) {
     return (
         <details className="vc-lean-section" open>
             <summary className="vc-lean-summary">
                 <span className="vc-lean-summary-title">{title}</span>
-                <span className="vc-lean-summary-count">{on} of {total} on</span>
+                {total != null && <span className="vc-lean-summary-count">{on} of {total} on</span>}
             </summary>
             <div className="vc-lean-body">{children}</div>
         </details>
@@ -107,6 +121,7 @@ function LeanPanel() {
 
     const headersOn = [s.spoofClient, s.stripDebugHeaders, s.spoofTimezone].filter(Boolean).length;
     const perfOn = [s.idlePause, s.freezeLoops, s.killBlur].filter(Boolean).length;
+    const nativeAudio = String(readAudioEngine());
 
     return (
         <div className="vc-lean-panel">
@@ -163,9 +178,32 @@ function LeanPanel() {
                     control={<Switch checked={s.killBlur} onChange={v => (s.killBlur = v)} />}
                 />
             </Section>
+
+            <Section title="Voice">
+                <Row
+                    name="Client"
+                    note="Which app is running this. Read from the global the client injects, since Vesktop reports itself as plain Chrome in the user agent."
+                    control={<span className="vc-lean-verdict">{detectClient()}</span>}
+                />
+                <Row
+                    name="Voice engine"
+                    note={VOICE_ENGINE_NOTE[nativeAudio]}
+                    control={<span className="vc-lean-verdict">{VOICE_ENGINE_NAME[nativeAudio]}</span>}
+                />
+            </Section>
         </div>
     );
 }
+
+const VOICE_ENGINE_NAME: Record<string, string> = { true: "native", false: "browser", null: "unknown" };
+
+const VOICE_ENGINE_NOTE: Record<string, string> = {
+    true: "Discord's native voice engine. The Input Volume slider works.",
+    false: "Discord's browser voice engine. Its Input Volume slider is an empty function, so the slider "
+        + "does nothing and there is no gain stage on the microphone path at all. Injecting Vencord into "
+        + "the Discord desktop app instead gets the native engine, and the slider, back.",
+    null: "Could not be read. Discord builds the engine lazily, so open voice settings once and reopen this."
+};
 
 const PROFILE_OPTIONS = [
     { label: "Random (chosen once, then remembered)", value: "", default: true },

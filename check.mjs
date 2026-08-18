@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 
 import { pickProfile, planTelemetrySweep, PROFILES, rewriteHeader, spoofSuperProps } from "./spoof.ts";
+import { detectClient, hasNativeAudioEngine, isRealImplementation } from "./voice.ts";
 
 // windows-only profiles — Sec-CH-UA-Platform leaks the real OS anyway, so a
 // cross-OS profile just singles you out. why: spoof.ts
@@ -150,6 +151,39 @@ assert.equal(rewriteHeader("x-discord-locale", "en-GB", opts), target.system_loc
     // cloud sync never gets swept — disclosed list, not changed
     assert.ok(allSafe.outOfReach.some(s => /cloud settings sync/i.test(s)));
     assert.ok(!allExposed.changed.some(s => /cloud/i.test(s)), "sweep must not disable cloud sync");
+}
+
+// voice engine detection
+{
+    // a detector that always answers "browser" would still make the mic diagnosis look right,
+    // so both directions are asserted: stubs must read stubbed AND real bodies must read real
+    for (const stub of [
+        "setInputVolume(e){}",
+        "setInputVolume(e) {  }",
+        "setInputVolume(e) {\n}",
+        "setAudioMixerOptions(e){}"
+    ]) assert.equal(isRealImplementation(stub), false, `stub read as real: ${stub}`);
+
+    for (const real of [
+        "setInputVolume(e){this.v=e}",
+        "setInputVolume(e) {\n  this.v = e;\n}",
+        "function setInputVolume() { [native code] }",
+        "setInputVolume(e){if(e){}}" // empty block inside a real body
+    ]) assert.equal(isRealImplementation(real), true, `real read as stub: ${real}`);
+
+    // an engine that does not exist yet is unknown, never "browser": reporting the browser
+    // engine when nothing was read would tell someone on the desktop app to switch clients
+    assert.equal(hasNativeAudioEngine(null), null);
+    assert.equal(hasNativeAudioEngine(undefined), null);
+    assert.equal(hasNativeAudioEngine({}), null, "an object with no setInputVolume is unknown");
+
+    assert.equal(hasNativeAudioEngine(Object.create({ setInputVolume(e) { } })), false);
+    assert.equal(hasNativeAudioEngine(Object.create({ setInputVolume(e) { this.v = e; } })), true);
+
+    // detectClient reads the injected global, since Vesktop's user agent says plain Chrome
+    assert.equal(detectClient({ VesktopNative: {}, DiscordNative: {} }), "Vesktop");
+    assert.equal(detectClient({ DiscordNative: {} }), "Discord desktop");
+    assert.equal(detectClient({}), "Browser");
 }
 
 console.log(`ok - ${PROFILES.length} profiles, all checks passed`);

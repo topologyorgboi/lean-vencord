@@ -74,6 +74,35 @@ to type 320 characters, inside the noise), `content-visibility` on message rows 
 already virtualises the list, so barely anything offscreen is left to skip), and freezing
 animated images (0.05s per 8s).
 
+## Voice
+
+Two read-only rows, because one of them explains a problem people spend a long time blaming on
+their microphone.
+
+Discord ships two voice engines in the same bundle and uses the native one only where a real
+`DiscordNative.nativeModules` can load `discord_voice`. Vesktop loads the web client, so it gets
+the browser engine, and on that engine `setInputVolume` is an empty function body:
+
+```js
+setInputVolume(e){}
+```
+
+Discord's **Input Volume slider does nothing there**. Nor is there anything else to turn up: every
+gain node in the graph belongs to a remote user, so other people's volumes work and yours cannot
+be touched. `bypassSystemInputProcessing` is stored and applied by nothing for the same reason.
+The plugin reads the function body rather than asking the store, because every getter answers
+on both engines and so cannot tell them apart.
+
+The client row reads the global the app injects rather than the user agent, since Vesktop reports
+itself as plain Chrome.
+
+If the row says `browser` and you want the slider back, inject into the Discord desktop app
+(`pnpm inject`) instead of running Vesktop. That is what selects the native engine.
+
+Measured while this was being worked out, so nobody repeats it: Krisp costs **0.38 dB** on speech,
+which is not what makes a mic quiet, and voice CPU does not show up in renderer profiling at all —
+6.5% of the renderer's main thread against 90-164% of a core across the whole process.
+
 ## The patches
 
 `plugin-modal-source-link.patch` is six lines. Vencord builds the github link in a plugin's
