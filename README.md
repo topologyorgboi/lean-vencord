@@ -53,8 +53,6 @@ discord gets its first request out before a normal plugin has loaded.
 
 ## speed
 
-three switches, measured on my machine.
-
 **freeze gradient names** is where most of the win is. one animated username on screen sat around
 17-20% cpu and about 3% once frozen, and two of them was roughly 55% against 5%. spinners, typing
 dots and skeletons are excluded by name so nothing ends up looking like a hung client.
