@@ -1,8 +1,7 @@
 # lean
 
-a vencord plugin that strips identifying request headers, gives vesktop a mic gain it has no other
-way to get, and cuts down the renderer work discord does while you're not looking at it. every
-part is a switch, and none of it duplicates notrack or silenttyping.
+a vencord plugin that strips identifying request headers, gives vesktop a mic gain, and cuts down
+the renderer work discord does while you're not looking at it.
 
 ## install
 
@@ -45,16 +44,16 @@ the files are there, so it never overwrites them.
 finds into the uuid it hands back. the names are hex-encoded and xored with `0x73`, so searching
 the bundle for "vencord" turns up nothing.
 
-profiles are windows-only, and that's deliberate. `Sec-CH-UA-Platform` is a forbidden header so
-nothing in the renderer can touch it, and it reports your real os, so a macos profile would
-contradict it on every request.
+profiles are windows-only. `Sec-CH-UA-Platform` is a forbidden header so nothing in the renderer
+can touch it, and it reports your real os, so a macos profile would contradict it on every
+request.
 
 the plugin also starts at `StartAt.Init` rather than the usual point, because on a warm boot
 discord gets its first request out before a normal plugin has loaded.
 
 ## speed
 
-three switches, measured on my machine rather than guessed at.
+three switches, measured on my machine.
 
 **freeze gradient names** is where most of the win is. one animated username on screen sat around
 17-20% cpu and about 3% once frozen, and two of them was roughly 55% against 5%. spinners, typing
@@ -64,13 +63,12 @@ it only works on web animations, though. avatar decorations, nameplates and anim
 animated webp going through the image pipeline, and `document.getAnimations()` never returns them,
 so discord's own reduced motion setting is what covers those.
 
-css can't do this on its own, which took a while to work out. `animation-play-state: paused`
-computes as "paused" on both the element and its `::before` while the animation carries on
-running. pausing the animation object does stop it, so that's what both switches use.
+css can't do this on its own. `animation-play-state: paused` computes as "paused" on both the
+element and its `::before` while the animation carries on running. pausing the animation object
+does stop it, so that's what both switches use.
 
 **idle pause** freezes the same loops plus transitions and blur whenever the window is in the
-background. it does more on vesktop than you'd expect, since vesktop turns chromium's background
-throttling off.
+background. it does more on vesktop, since vesktop turns chromium's background throttling off.
 
 **kill blur** strips backdrop blur. most of the time there's nothing to strip until a popout or a
 modal opens, which is where discord uses it.
@@ -108,8 +106,7 @@ with a limiter after it so loud syllables don't clip. at 0 db it does nothing an
 graph, and the desktop app is skipped, where `getUserMedia` only carries screen share and camera.
 
 that gain node ends up being the only thing on the mic path, so discord's input volume slider is
-wired straight to it, which is what makes it work there. the db setting is the ceiling and the
-slider comes down from there.
+wired straight to it. the db setting is the ceiling and the slider comes down from there.
 
 i checked it by opening a boosted and an unboosted capture of the same mic at the same moment and
 comparing the two. asking for 24 db came out at 25.7, the extra 1.7 being the compressor's own
