@@ -5,12 +5,8 @@
  */
 
 /*
- * Lean. Two halves, each piece switchable:
- *   1. OPSEC: rewrites or withholds identifying headers Discord gives no setting for.
- *   2. Performance: renderer-side wins no checkbox already covers.
- *
- * Duplicates nothing in NoTrack, SilentTyping, or the Vesktop and Discord settings for
- * hardware acceleration, spellcheck, reduced motion, GIF autoplay and game detection.
+ * Lean: header spoofing, renderer performance, and the mic gain stage Discord's browser
+ * voice engine lacks. Every piece switchable. Duplicates nothing in NoTrack or SilentTyping.
  */
 
 import "./styles.css";
@@ -20,8 +16,9 @@ import { Switch } from "@components/Switch";
 import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType, StartAt } from "@utils/types";
 import { findByPropsLazy } from "@webpack";
-import { Button, Forms, Select, showToast, Toasts } from "@webpack/common";
+import { Button, Forms, Select, showToast, Slider, Toasts } from "@webpack/common";
 
+import { effectiveGain, shouldBoost, wantsAudio } from "./micgain";
 import { pickProfile, planTelemetrySweep, PROFILES, rewriteHeader, type RewriteOpts } from "./spoof";
 import { detectClient, hasNativeAudioEngine } from "./voice";
 
@@ -29,8 +26,8 @@ const logger = new Logger("Lean");
 
 const MediaEngineStore = findByPropsLazy("getNoiseSuppression", "getEchoCancellation");
 
-// the store is a lazy proxy and the engine is built on demand, so both can throw before a
-// voice channel has ever been opened. an unreadable engine is "unknown", never "browser".
+// lazy proxy, engine built on demand: both throw before any voice UI opens.
+// unreadable means unknown, never browser
 function readAudioEngine(): boolean | null {
     try {
         return hasNativeAudioEngine(MediaEngineStore?.getMediaEngine?.());
@@ -39,8 +36,7 @@ function readAudioEngine(): boolean | null {
     }
 }
 
-// last row of the security section: it is an action over those same toggles, not a
-// separate feature, so it belongs with them rather than above the whole panel
+// an action over the security toggles, so it sits with them
 function SweepButton() {
     return (
         <div className="vc-lean-row vc-lean-sweep">
@@ -61,8 +57,7 @@ function SweepButton() {
                     s.stripDebugHeaders = true;
                     s.spoofTimezone = true;
 
-                    // "changed", not "turned off": analytics goes off, spoofing goes on,
-                    // one prefix covers both directions
+                    // "changed" covers both directions: analytics off, spoofing on
                     showToast(
                         plan.changed.length
                             ? `Changed: ${plan.changed.join("; ")}`
@@ -97,8 +92,7 @@ function Row({ name, note, control, stacked }: {
     );
 }
 
-// open by default: a collapsed panel hides whether anything is on, and the count in the
-// summary is only useful once you have closed it yourself
+// open by default; the count only matters once you collapse it
 function Section({ title, on, total, children }: React.PropsWithChildren<{
     title: string; on?: number; total?: number;
 }>) {
@@ -116,7 +110,7 @@ function Section({ title, on, total, children }: React.PropsWithChildren<{
 function LeanPanel() {
     const s = settings.use([
         "spoofClient", "deviceProfile", "stripDebugHeaders",
-        "spoofTimezone", "idlePause", "freezeLoops", "killBlur"
+        "spoofTimezone", "idlePause", "freezeLoops", "killBlur", "micGainDb"
     ]);
 
     const headersOn = [s.spoofClient, s.stripDebugHeaders, s.spoofTimezone].filter(Boolean).length;
@@ -128,13 +122,13 @@ function LeanPanel() {
             <Section title="Security" on={headersOn} total={3}>
                 <Row
                     name="Spoof client"
-                    note="Claim a different machine in X-Super-Properties. Build number and channel stay real."
+                    note={NOTES.spoofClient}
                     control={<Switch checked={s.spoofClient} onChange={v => (s.spoofClient = v)} />}
                 />
                 <Row
                     stacked
                     name="Device profile"
-                    note="Which machine to claim. Random picks one and keeps it, since a machine that changes every launch stands out."
+                    note={NOTES.deviceProfile}
                     control={
                         <Select
                             options={PROFILE_OPTIONS}
@@ -150,12 +144,12 @@ function LeanPanel() {
                 />
                 <Row
                     name="Strip debug headers"
-                    note="Drop X-Debug-Options and X-Track."
+                    note={NOTES.stripDebugHeaders}
                     control={<Switch checked={s.stripDebugHeaders} onChange={v => (s.stripDebugHeaders = v)} />}
                 />
                 <Row
                     name="Spoof timezone"
-                    note="Replace X-Discord-Timezone, which otherwise gives away your city."
+                    note={NOTES.spoofTimezone}
                     control={<Switch checked={s.spoofTimezone} onChange={v => (s.spoofTimezone = v)} />}
                 />
                 <SweepButton />
@@ -164,17 +158,17 @@ function LeanPanel() {
             <Section title="Performance" on={perfOn} total={3}>
                 <Row
                     name="Idle pause"
-                    note="Freeze animations, transitions and blur while the window is in the background. Nothing changes while you're looking at it."
+                    note={NOTES.idlePause}
                     control={<Switch checked={s.idlePause} onChange={v => (s.idlePause = v)} />}
                 />
                 <Row
                     name="Freeze gradient names"
-                    note="Hold looping CSS animations still. Measured 55% CPU against 5% on an idle window. Avatar decorations and nameplates are animated images, not animations, so they keep moving: Discord's Reduced Motion setting is what stops those."
+                    note={NOTES.freezeLoops}
                     control={<Switch checked={s.freezeLoops} onChange={v => (s.freezeLoops = v)} />}
                 />
                 <Row
                     name="Kill blur"
-                    note="Remove every backdrop blur. Big GPU saving, but popouts stop looking frosted."
+                    note={NOTES.killBlur}
                     control={<Switch checked={s.killBlur} onChange={v => (s.killBlur = v)} />}
                 />
             </Section>
@@ -182,13 +176,30 @@ function LeanPanel() {
             <Section title="Voice">
                 <Row
                     name="Client"
-                    note="Which app is running this. Read from the global the client injects, since Vesktop reports itself as plain Chrome in the user agent."
+                    note={NOTES.client}
                     control={<span className="vc-lean-verdict">{detectClient()}</span>}
                 />
                 <Row
                     name="Voice engine"
                     note={VOICE_ENGINE_NOTE[nativeAudio]}
                     control={<span className="vc-lean-verdict">{VOICE_ENGINE_NAME[nativeAudio]}</span>}
+                />
+                <Row
+                    stacked
+                    name="Mic gain"
+                    note={MIC_GAIN_NOTE[nativeAudio]}
+                    control={
+                        <Slider
+                            initialValue={s.micGainDb}
+                            minValue={0}
+                            maxValue={36}
+                            markers={MIC_GAIN_MARKERS}
+                            stickToMarkers={false}
+                            disabled={nativeAudio === "true"}
+                            onValueChange={(v: number) => (s.micGainDb = Math.round(v))}
+                            onValueRender={(v: number) => `${Math.round(v)} dB`}
+                        />
+                    }
                 />
             </Section>
         </div>
@@ -198,11 +209,33 @@ function LeanPanel() {
 const VOICE_ENGINE_NAME: Record<string, string> = { true: "native", false: "browser", null: "unknown" };
 
 const VOICE_ENGINE_NOTE: Record<string, string> = {
-    true: "Discord's native voice engine. The Input Volume slider works.",
-    false: "Discord's browser voice engine. Its Input Volume slider is an empty function, so the slider "
-        + "does nothing and there is no gain stage on the microphone path at all. Injecting Vencord into "
-        + "the Discord desktop app instead gets the native engine, and the slider, back.",
-    null: "Could not be read. Discord builds the engine lazily, so open voice settings once and reopen this."
+    true: "Native engine. Input Volume works.",
+    false: "Browser engine. Its setInputVolume is an empty function and the mic path has no gain stage.",
+    null: "Not built yet. Open voice settings once, then reopen this."
+};
+
+const MIC_GAIN_MARKERS = [0, 6, 12, 18, 24, 30, 36];
+
+const MIC_GAIN_NOTE: Record<string, string> = {
+    true: "Not needed. The native engine has its own input volume.",
+    false: "Chromium takes the mic unprocessed, so Windows effect chains never reach it: 33 dB of loss "
+        + "here. This is the ceiling, and Discord's Input Volume trims down from it. A limiter after "
+        + "the gain stops loud syllables clipping.",
+    null: "Open voice settings once, then reopen this."
+};
+
+// one string per row, read by both the panel and the settings description below
+const NOTES = {
+    spoofClient: "Claim a different machine in X-Super-Properties. Build number and channel stay real.",
+    deviceProfile: "Which machine to claim. Random picks one and keeps it.",
+    stripDebugHeaders: "Drop X-Debug-Options and X-Track.",
+    spoofTimezone: "Replace X-Discord-Timezone, which otherwise gives away your city.",
+    idlePause: "Freeze animations, transitions and blur while the window is in the background.",
+    freezeLoops: "Hold looping CSS animations still: 55% CPU against 5% on an idle window. Avatar "
+        + "decorations and nameplates are images rather than animations, so Reduced Motion covers those.",
+    killBlur: "Remove every backdrop blur. Saves GPU, but popouts stop looking frosted.",
+    micGainDb: "Mic gain in dB. 0 passes the stream through untouched.",
+    client: "Which app is running this. Read from the injected global, since Vesktop's user agent says plain Chrome."
 };
 
 const PROFILE_OPTIONS = [
@@ -210,9 +243,8 @@ const PROFILE_OPTIONS = [
     ...PROFILES.map(p => ({ label: `${p.os} ${p.os_arch} / ${p.system_locale}`, value: p.id }))
 ];
 
-// every option is hidden from Vencord's own list renderer and drawn by LeanPanel instead,
-// which is the only way to group them. they stay declared here so storage, defaults,
-// onChange and settings import/export all keep working
+// hidden from Vencord's list renderer and drawn by LeanPanel, the only way to group them.
+// still declared here so storage, defaults, onChange and import/export keep working
 const settings = definePluginSettings({
     panel: {
         type: OptionType.COMPONENT,
@@ -222,13 +254,13 @@ const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         default: true,
         hidden: true,
-        description: "Claim a different machine in X-Super-Properties. Build number and channel stay real.",
+        description: NOTES.spoofClient,
         onChange: refreshOpts
     },
     deviceProfile: {
         type: OptionType.SELECT,
         hidden: true,
-        description: "Which machine to claim. Random picks one and keeps it, since a machine that changes every launch stands out.",
+        description: NOTES.deviceProfile,
         options: PROFILE_OPTIONS,
         onChange: refreshOpts
     },
@@ -236,44 +268,52 @@ const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         default: true,
         hidden: true,
-        description: "Drop X-Debug-Options and X-Track.",
+        description: NOTES.stripDebugHeaders,
         onChange: refreshOpts
     },
     spoofTimezone: {
         type: OptionType.BOOLEAN,
         default: true,
         hidden: true,
-        description: "Replace X-Discord-Timezone, which otherwise gives away your city.",
+        description: NOTES.spoofTimezone,
         onChange: refreshOpts
     },
     idlePause: {
         type: OptionType.BOOLEAN,
         default: true,
         hidden: true,
-        description: "Freeze animations, transitions and blur while the window is in the background. Nothing changes while you're looking at it.",
-        // this one drives both halves: the stylesheet for transitions and blur, the freeze for loops
+        description: NOTES.idlePause,
+        // drives both halves: stylesheet for transitions and blur, freeze for loops
         onChange: () => { applyCss(); applyFreeze(); }
     },
     freezeLoops: {
         type: OptionType.BOOLEAN,
         default: false,
         hidden: true,
-        description: "Hold looping CSS animations still, gradient usernames above all. Cannot touch avatar decorations, nameplates or animated avatars: those are animated images, which Discord's own Reduced Motion setting covers. Spinners and typing dots keep moving.",
+        description: NOTES.freezeLoops,
         onChange: applyFreeze
     },
     killBlur: {
         type: OptionType.BOOLEAN,
         default: false,
         hidden: true,
-        description: "Remove every backdrop blur. Big GPU saving, but popouts stop looking frosted.",
+        description: NOTES.killBlur,
         onChange: applyCss
+    },
+    micGainDb: {
+        type: OptionType.SLIDER,
+        default: 0,
+        hidden: true,
+        markers: MIC_GAIN_MARKERS,
+        stickToMarkers: false,
+        description: NOTES.micGainDb,
+        onChange: applyMicGain
     }
 });
 
 let started = false;
 
-// rebuilt on settings change, not per header. discord sets 6 to 8 headers a request,
-// and walking the settings proxy for each is the exact cost this plugin exists to delete
+// rebuilt on settings change, not per header: discord sets 6-8 headers a request
 let currentOpts: RewriteOpts = { profile: null, stripDebug: false, spoofTimezone: false };
 
 function refreshOpts() {
@@ -286,8 +326,7 @@ function refreshOpts() {
 }
 
 // --- request headers ------------------------------------------------------
-// hook the two transports instead of patching discord's request module, so nothing here
-// depends on a webpack module surviving the next client update
+// hook the transports, not discord's request module: no webpack module to survive an update
 
 let ourSetHeader: typeof XMLHttpRequest.prototype.setRequestHeader | null = null;
 let ourFetch: typeof window.fetch | null = null;
@@ -295,9 +334,8 @@ let prevSetHeader: typeof XMLHttpRequest.prototype.setRequestHeader;
 let prevFetch: typeof window.fetch;
 
 function hookRequests() {
-    // captured here, not at module load: another plugin may have wrapped these after us,
-    // and restoring a module-load snapshot would silently delete its wrapper. plugins get
-    // toggled at runtime, so that ordering is reachable
+    // captured here, not at module load: another plugin may have wrapped these since, and
+    // restoring an old snapshot would delete its wrapper
     prevSetHeader = XMLHttpRequest.prototype.setRequestHeader;
     prevFetch = window.fetch;
 
@@ -308,8 +346,8 @@ function hookRequests() {
     };
 
     ourFetch = function (input: any, init?: RequestInit) {
-        // read settings before building the Request. new Request() marks its input used,
-        // so a throw after it leaves the fallback with a dead body and an unrelated TypeError
+        // read settings first: new Request() marks its input used, so a throw after it
+        // leaves the fallback with a dead body
         const o = currentOpts;
         let req: Request;
         try {
@@ -330,11 +368,118 @@ function hookRequests() {
 }
 
 function unhookRequests() {
-    // only unwind if nothing wrapped us since, else leave the chain alone rather than
-    // clobber another plugin's hook
+    // only unwind if nothing wrapped us since, else leave another plugin's hook alone
     if (XMLHttpRequest.prototype.setRequestHeader === ourSetHeader) XMLHttpRequest.prototype.setRequestHeader = prevSetHeader;
     if (window.fetch === ourFetch) window.fetch = prevFetch;
     ourSetHeader = ourFetch = null;
+}
+
+// --- microphone gain ------------------------------------------------------
+// the only point on the input path where the level can change. why: micgain.ts
+
+let ourGetUserMedia: typeof navigator.mediaDevices.getUserMedia | null = null;
+let prevGetUserMedia: typeof navigator.mediaDevices.getUserMedia;
+const liveGains = new Set<GainNode>();
+let volumeListening = false;
+
+// unreadable volume means no attenuation, never silence
+function readInputVolume(): number {
+    try {
+        const v = MediaEngineStore?.getInputVolume?.();
+        return typeof v === "number" ? v : 100;
+    } catch {
+        return 100;
+    }
+}
+
+// nothing else retunes the graph when the slider moves, so listen to the store
+function watchInputVolume() {
+    if (volumeListening) return;
+    try {
+        MediaEngineStore.addChangeListener(applyMicGain);
+        volumeListening = true;
+    } catch {
+        // engine not built yet; tried again on the next capture
+    }
+}
+
+function applyMicGain() {
+    const g = effectiveGain(settings.store.micGainDb, readInputVolume());
+    // an open mic is not re-acquired on a settings change, so retune in place
+    liveGains.forEach(node => { node.gain.value = g; });
+}
+
+function boostStream(stream: MediaStream): MediaStream {
+    const source = stream.getAudioTracks()[0];
+    if (!source) return stream;
+
+    watchInputVolume();
+
+    const ctx = new AudioContext();
+    const gain = ctx.createGain();
+    gain.gain.value = effectiveGain(settings.store.micGainDb, readInputVolume());
+
+    // a limiter, not a compressor: thirty-odd dB clips on any loud syllable
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -3;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.1;
+
+    const dest = ctx.createMediaStreamDestination();
+    ctx.createMediaStreamSource(stream).connect(gain).connect(limiter).connect(dest);
+    liveGains.add(gain);
+
+    const out = dest.stream.getAudioTracks()[0];
+
+    // the caller gets a different track than the device's. stopping it would leave the mic
+    // open, and Discord reads the device off getSettings(), so both must reach the real one
+    const stopDest = out.stop.bind(out);
+    out.stop = () => {
+        stopDest();
+        stream.getTracks().forEach(t => t.stop());
+        liveGains.delete(gain);
+        ctx.close();
+    };
+    out.getSettings = () => source.getSettings();
+
+    return new MediaStream([out, ...stream.getVideoTracks()]);
+}
+
+function hookMic() {
+    const md = navigator.mediaDevices;
+    if (!md?.getUserMedia) return;
+
+    // call through rather than replace: Vesktop wraps getUserMedia for screen-share audio
+    prevGetUserMedia = md.getUserMedia.bind(md);
+
+    ourGetUserMedia = async (constraints?: MediaStreamConstraints) => {
+        const stream = await prevGetUserMedia(constraints);
+        if (!wantsAudio(constraints) || !shouldBoost(settings.store.micGainDb, detectClient()))
+            return stream;
+        try {
+            return boostStream(stream);
+        } catch (e) {
+            // a broken graph must never cost someone their microphone
+            logger.error("mic gain failed, passing the stream through untouched", e);
+            return stream;
+        }
+    };
+
+      md.getUserMedia = ourGetUserMedia;
+    watchInputVolume();
+}
+
+function unhookMic() {
+    const md = navigator.mediaDevices;
+    if (md && md.getUserMedia === ourGetUserMedia) md.getUserMedia = prevGetUserMedia;
+    ourGetUserMedia = null;
+    liveGains.clear();
+    if (volumeListening) {
+        try { MediaEngineStore.removeChangeListener(applyMicGain); } catch { /* store never resolved */ }
+        volumeListening = false;
+    }
 }
 
 // --- renderer performance -------------------------------------------------
@@ -370,16 +515,12 @@ function buildCss(): string {
 }
 
 /*
- * Discord's animated username and avatar cosmetics loop forever, and they are not cheap.
- * Two of them on screen measured 54.8% CPU against 5.1% with animations paused, 1,598 style
- * recalcs in twelve seconds against 64. Nothing else on an idle client came close.
+ * Animated name and avatar cosmetics loop forever and are not cheap: two on screen measured
+ * 54.8% CPU against 5.1% paused, and 1,598 style recalcs in twelve seconds against 64.
  *
- * Loading spinners and typing dots loop too and have to keep moving, so they are excluded by
- * class rather than frozen with the rest.
+ * Spinners and typing dots loop too and must keep moving, so they are excluded by class.
+ * A frozen spinner reads as a hung client, hence the explicit names.
  */
-// wanderingCubes, chasingDots, pulsingEllipsis and spinningCircle are Discord's own spinner
-// variants by name. A frozen spinner reads as a hung client, so they are named explicitly
-// rather than left to the generic words.
 const KEEP_MOVING = /spinner|spinning|wanderingCubes|chasingDots|pulsingEllipsis|loading|pulse|typing|ellipsis|progress|placeholder|skeleton/i;
 const frozen = new Set<Animation>();
 
@@ -411,8 +552,8 @@ function thawLoops() {
 const shouldFreeze = () =>
     settings.store.freezeLoops || (settings.store.idlePause && !document.hasFocus());
 
-// animationstart bubbles, so one listener catches every cosmetic Discord adds later without
-// polling. a burst of them collapses into a single sweep per frame.
+// animationstart bubbles, so one listener catches every cosmetic added later. a burst
+// collapses into one sweep per frame
 let sweepQueued = false;
 const onAnimationStart = () => {
     if (sweepQueued || !started || !shouldFreeze()) return;
@@ -430,8 +571,8 @@ function applyFreeze() {
 }
 
 function applyCss() {
-    // onChange handlers stay registered for disabled plugins. without this guard a toggle
-    // re-injects the stylesheet after stop() removed it
+    // onChange stays registered for disabled plugins; without this a toggle re-injects
+    // the stylesheet after stop() removed it
     if (!started) return;
     let el = document.getElementById(STYLE_ID);
     if (!el) {
@@ -443,15 +584,13 @@ function applyCss() {
 }
 
 /*
- * window blur also fires when focus moves into an embedded iframe, say a youtube or
- * spotify player in chat, where the user is still looking right at us.
- * body can still be null when stop() runs, since start() is now Init-early.
+ * blur also fires when focus moves into an embedded iframe, a youtube or spotify player in
+ * chat, where the window is still in view. body can be null when stop() runs, since start()
+ * is Init-early.
  *
- * The stylesheet alone is not enough. Against a looping cosmetic, `animation-play-state:
- * paused` computes to "paused" on both the element and its ::before, and the animation keeps
- * running anyway: 1,621 style recalcs with the idle class against 1,608 without it. Calling
- * pause() on the animation itself does stop it, so blur freezes loops the same way the
- * Performance toggle does. The CSS stays for transitions and blur, which it does handle.
+ * CSS alone is not enough: `animation-play-state: paused` computes to "paused" on the element
+ * and its ::before while the animation keeps running, 1,621 style recalcs against 1,608.
+ * pause() on the animation does stop it. The CSS stays for transitions and blur.
  */
 const onBlur = () => {
     if (document.hasFocus()) return;
@@ -464,8 +603,7 @@ const onFocus = () => {
     if (!settings.store.freezeLoops) thawLoops();
 };
 
-// the header hook runs at StartAt.Init, which can be before document.head and
-// document.body exist, so everything touching the DOM waits for the document
+// StartAt.Init can be before document.head and body exist, so DOM work waits
 function startDomWork() {
     if (!started) return;
     applyCss();
@@ -482,12 +620,12 @@ export default definePlugin({
     authors: [{ name: "betabuxx", id: 1416268961162596364n }],
     settings,
 
-    // drives the github icon in the modal header. needs plugin-modal-source-link.patch,
-    // since stock Vencord only builds that link for its own bundled plugins
+    // github icon in the modal header. needs plugin-modal-source-link.patch: stock Vencord
+    // only builds that link for its own bundled plugins
     sourceUrl: "https://github.com/topologyorgboi/lean-vencord",
 
-    // as early as Vencord allows. the default is WebpackReady, and on a warm boot
-    // Discord can get an API request out before that, which goes unspoofed
+    // the default WebpackReady is too late: on a warm boot Discord gets a request out
+    // before it, unspoofed
     startAt: StartAt.Init,
 
     start() {
@@ -498,6 +636,7 @@ export default definePlugin({
         started = true;
         refreshOpts();
         hookRequests();
+        hookMic();
 
         if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startDomWork, { once: true });
         else startDomWork();
@@ -506,6 +645,7 @@ export default definePlugin({
     stop() {
         started = false;
         unhookRequests();
+        unhookMic();
         document.removeEventListener("DOMContentLoaded", startDomWork);
         document.getElementById(STYLE_ID)?.remove();
         onFocus();
@@ -517,12 +657,10 @@ export default definePlugin({
 });
 
 /*
- * Known limits. This only covers REST headers.
- *
- * The gateway IDENTIFY payload sends its own os/browser/device over the WebSocket in ETF,
- * so Settings > Devices still shows the real machine. Patching the module that builds
- * super-properties would cover both at once, which is where this should go next.
+ * Limits. REST headers only: the gateway IDENTIFY payload sends its own os/browser/device
+ * over the WebSocket in ETF, so Settings > Devices still shows the real machine. Patching
+ * the module that builds super-properties would cover both.
  *
  * User-Agent and Sec-CH-UA-* are forbidden headers, so the claimed OS always rides next to
- * a real Chromium UA. Keep profiles on the host OS until that is fixed.
+ * a real Chromium UA. Keep profiles on the host OS until that changes.
  */

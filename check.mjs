@@ -9,10 +9,11 @@
 // Node 23 and above strips TS types natively, so no build step is needed.
 import assert from "node:assert/strict";
 
+import { dbToGain, effectiveGain, shouldBoost, wantsAudio } from "./micgain.ts";
 import { pickProfile, planTelemetrySweep, PROFILES, rewriteHeader, spoofSuperProps } from "./spoof.ts";
 import { detectClient, hasNativeAudioEngine, isRealImplementation } from "./voice.ts";
 
-// windows-only profiles — Sec-CH-UA-Platform leaks the real OS anyway, so a
+// windows-only profiles: Sec-CH-UA-Platform leaks the real OS anyway, so a
 // cross-OS profile just singles you out. why: spoof.ts
 assert.ok(PROFILES.every(p => p.os === "Windows"), "a non-Windows profile contradicts the unspoofable Sec-CH-UA-Platform hint");
 
@@ -55,7 +56,7 @@ assert.equal(decode(spoofSuperProps(realB64, target)).release_channel, REAL.rele
     assert.equal(out.system_locale, target.system_locale);
 }
 
-// 3. UA stays self-consistent — real client/Electron versions kept, only the OS
+// 3. UA stays self-consistent: real client/Electron versions kept, only the OS
 //    token moved
 {
     const ua = decode(spoofSuperProps(realB64, target)).browser_user_agent;
@@ -65,7 +66,7 @@ assert.equal(decode(spoofSuperProps(realB64, target)).release_channel, REAL.rele
     assert.match(ua, new RegExp(target.uaOs.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 }
 
-// 4. launch-correlation fields overwritten in place — every real client sends all
+// 4. launch-correlation fields overwritten in place: every real client sends all
 //    three, so missing keys shout louder than odd ones. launch_signature is in
 //    the set because it is the client-mod detector.
 {
@@ -82,13 +83,13 @@ assert.equal(decode(spoofSuperProps(realB64, target)).release_channel, REAL.rele
 assert.equal(spoofSuperProps("not base64 at all!!", target), "not base64 at all!!");
 assert.equal(spoofSuperProps(btoa("[1,2,3]"), target), btoa("[1,2,3]"));
 
-// 5b. encoding fails closed too — see the catch in spoofSuperProps
+// 5b. encoding fails closed too: see the catch in spoofSuperProps
 {
     const nonAscii = { ...target, os: "Wíndows", system_locale: "ja-日本" };
     assert.equal(spoofSuperProps(realB64, nonAscii), realB64);
 }
 
-// 6. a pinned id stays put across calls — that stability is the whole point
+// 6. a pinned id stays put across calls: that stability is the whole point
 assert.equal(pickProfile("win10-x64-de", () => 0.99).id, "win10-x64-de");
 assert.equal(pickProfile("nope", () => 0).id, PROFILES[0].id);
 assert.equal(pickProfile("", () => 0.999999).id, PROFILES.at(-1).id);
@@ -98,16 +99,16 @@ const opts = { profile: target, stripDebug: true, spoofTimezone: true };
 for (const h of ["X-Debug-Options", "x-track", "x-DEBUG-options"])
     assert.equal(rewriteHeader(h, "whatever", opts), null, h);
 
-// 7b. X-Fingerprint must survive — it binds register, login and captcha to one
+// 7b. X-Fingerprint must survive: it binds register, login and captcha to one
 //     session. drop it and you get a failed signup or a captcha loop nobody
 //     traces back to a header-stripping plugin.
 assert.equal(rewriteHeader("X-Fingerprint", "1234.abcd", opts), "1234.abcd");
 
-// 8. auth/content headers untouched — rewriting these breaks the client
+// 8. auth/content headers untouched: rewriting these breaks the client
 for (const [h, v] of [["Authorization", "tok"], ["Content-Type", "application/json"], ["X-Discord-MFA-Authorization", "tok"]])
     assert.equal(rewriteHeader(h, v, opts), v, h);
 
-// 9. timezone leaks your city — pin it to the profile
+// 9. timezone leaks your city: pin it to the profile
 assert.equal(rewriteHeader("X-Discord-Timezone", "America/New_York", opts), target.timezone);
 assert.equal(rewriteHeader("x-discord-locale", "en-GB", opts), target.system_locale);
 
@@ -144,11 +145,11 @@ assert.equal(rewriteHeader("x-discord-locale", "en-GB", opts), target.system_loc
     assert.equal(allExposed.changed.length, 4);
     assert.equal(allExposed.alreadyOff.length, 0);
 
-    // never silently kill another plugin's third-party calls — that is a
+    // never silently kill another plugin's third-party calls: that is a
     // functionality change, not a telemetry fix
     assert.ok(allSafe.outOfReach.some(s => /Dearrow/.test(s)));
 
-    // cloud sync never gets swept — disclosed list, not changed
+    // cloud sync never gets swept: disclosed list, not changed
     assert.ok(allSafe.outOfReach.some(s => /cloud settings sync/i.test(s)));
     assert.ok(!allExposed.changed.some(s => /cloud/i.test(s)), "sweep must not disable cloud sync");
 }
@@ -184,6 +185,47 @@ assert.equal(rewriteHeader("x-discord-locale", "en-GB", opts), target.system_loc
     assert.equal(detectClient({ VesktopNative: {}, DiscordNative: {} }), "Vesktop");
     assert.equal(detectClient({ DiscordNative: {} }), "Discord desktop");
     assert.equal(detectClient({}), "Browser");
+}
+
+// mic gain. a wrong decibel conversion is invisible in use: it still sounds like "a bit
+// louder", just never the amount that was asked for
+{
+    // 0 dB must be EXACTLY unity. anything else means "off" still colours the signal
+    assert.equal(dbToGain(0), 1);
+    assert.ok(Math.abs(dbToGain(20) - 10) < 1e-9, "20 dB is ten times the amplitude");
+    assert.ok(Math.abs(dbToGain(40) - 100) < 1e-9);
+    assert.ok(Math.abs(dbToGain(6) - 1.9952623) < 1e-6, "6 dB is roughly double");
+    // the loss actually measured against the same mic read through an ordinary capture
+    assert.ok(Math.abs(dbToGain(33) - 44.6683592) < 1e-6);
+
+    // the desktop app puts only screen share and camera through getUserMedia, so boosting
+    // there would raise whatever someone is sharing rather than their voice
+    assert.equal(shouldBoost(24, "Discord desktop"), false);
+    assert.equal(shouldBoost(24, "Vesktop"), true);
+    assert.equal(shouldBoost(24, "Browser"), true);
+    // 0 must not wrap the stream at all, so the default install adds no audio graph
+    assert.equal(shouldBoost(0, "Vesktop"), false);
+    assert.equal(shouldBoost(0, "Discord desktop"), false);
+
+    assert.equal(wantsAudio({ audio: true }), true);
+    assert.equal(wantsAudio({ audio: { deviceId: "x" } }), true);
+    assert.equal(wantsAudio({ video: true }), false, "a camera-only request must pass through");
+    assert.equal(wantsAudio({ audio: false, video: true }), false);
+    assert.equal(wantsAudio(undefined), false);
+
+    // Discord's Input Volume folded in: the dB setting is the ceiling, the slider trims down
+    assert.equal(effectiveGain(0, 100), 1, "0 dB at full volume must be unity");
+    assert.equal(effectiveGain(20, 100), dbToGain(20));
+    assert.ok(Math.abs(effectiveGain(20, 50) - 5) < 1e-9, "half volume halves the amplitude");
+    assert.equal(effectiveGain(20, 0), 0, "volume 0 must be silence, not a floor");
+    assert.ok(Math.abs(effectiveGain(0, 25) - 0.25) < 1e-9);
+
+    // the value comes from a store rather than the control, so it is bounded, not trusted:
+    // an unbounded multiplier on a microphone is heard once and never forgiven
+    assert.equal(effectiveGain(0, -50), 0, "a negative volume must not invert the signal");
+    assert.equal(effectiveGain(0, 1e9), 2, "an absurd volume is clamped, not honoured");
+    assert.equal(effectiveGain(0, NaN), 1, "an unreadable volume means no attenuation");
+    assert.equal(effectiveGain(0, Infinity), 1, "a non-finite volume means no attenuation");
 }
 
 console.log(`ok - ${PROFILES.length} profiles, all checks passed`);
