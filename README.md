@@ -1,7 +1,7 @@
 # lean
 
-a vencord plugin that strips identifying request headers, gives vesktop a mic gain, and cuts down
-the renderer work discord does while you're not looking at it.
+a vencord plugin that strips identifying request headers, gives vesktop a mic gain, and cuts
+renderer overhead.
 
 ## install
 
@@ -13,8 +13,8 @@ git apply src/userplugins/lean/patches/*.patch
 pnpm build
 ```
 
-you can skip the `git apply` if all you want is the plugin. those two patches only make the boot
-faster and add a source link to the plugin's settings header.
+skip the `git apply` if you only want the plugin. those two patches make the boot faster and add a
+source link to the plugin's settings header.
 
 vesktop needs one extra step, since it keeps its own copy of vencord and ignores `vencordDir`:
 
@@ -24,10 +24,10 @@ Copy-Item dist\vencordDesktop* "$env:APPDATA\vesktop\sessionData\vencordFiles" -
 
 restart it, then enable lean under settings > plugins.
 
-before anything else though, turn off **vencord > automatically update**. it'll quietly swap those
-files back to the official build and take the plugin with them. if you've ever seen the "vencord
-has been updated!" popup with no changelog behind it, that was this. vesktop itself only checks
-the files are there, so it never overwrites them.
+turn off **vencord > automatically update**. it'll quietly swap those files back to the official
+build and take the plugin with them. if you've ever seen the "vencord has been updated!" popup
+with no changelog behind it, that was this. vesktop itself only checks the files are there, so it
+never overwrites them.
 
 ## headers
 
@@ -39,10 +39,10 @@ the files are there, so it never overwrites them.
 | `X-Discord-Timezone`, `X-Discord-Locale` | pinned to the profile, so your city isn't attached to every request |
 | `X-Fingerprint` | left alone. it ties register, login and captcha to one session, so pulling it breaks signup rather than hiding anything |
 
-`launch_signature` is the one that matters. it's a client-mod detector: libdiscore's wasm walks
-`globalThis` looking for vencord, vesktop, betterdiscord and a few others, then folds whatever it
-finds into the uuid it hands back. the names are hex-encoded and xored with `0x73`, so searching
-the bundle for "vencord" turns up nothing.
+`launch_signature` is a client-mod detector: libdiscore's wasm walks `globalThis` looking for
+vencord, vesktop, betterdiscord and a few others, then folds whatever it finds into the uuid it
+hands back. the names are hex-encoded and xored with `0x73`, so searching the bundle for "vencord"
+turns up nothing.
 
 profiles are windows-only. `Sec-CH-UA-Platform` is a forbidden header so nothing in the renderer
 can touch it, and it reports your real os, so a macos profile would contradict it on every
@@ -71,8 +71,8 @@ background. it does more on vesktop, since vesktop turns chromium's background t
 **kill blur** strips backdrop blur. most of the time there's nothing to strip until a popout or a
 modal opens, which is where discord uses it.
 
-a few things got measured and thrown out: turning off spellcheck, `content-visibility` on message
-rows (the list is already virtualised), and freezing animated images.
+measured and thrown out: turning off spellcheck, `content-visibility` on message rows (the list is
+already virtualised), and freezing animated images.
 
 ## voice
 
@@ -111,8 +111,8 @@ comparing the two. asking for 24 db came out at 25.7, the extra 1.7 being the co
 gain, and halving the slider halved the level. don't measure one arm at a time, a quiet room
 drifts further than the thing you're trying to see.
 
-two other things fell out of it: krisp costs almost nothing on speech volume, and voice cpu never
-shows up in renderer profiling, so a renderer profile tells you nothing about a call.
+krisp costs almost nothing on speech volume, and voice cpu never shows up in renderer profiling,
+so a renderer profile tells you nothing about a call.
 
 ## the patches
 
